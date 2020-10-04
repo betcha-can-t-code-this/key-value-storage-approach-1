@@ -86,7 +86,7 @@ static void read_and_process(int fd)
 
 			if (key == NULL || value == NULL) {
 				send(fd, "Wrong number of arguments required for 'SET' command.\n", 54, 0);
-				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of argument required for 'SET' command.\n");
+				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'SET' command.\n");
 				continue;
 			}
 
@@ -98,6 +98,46 @@ static void read_and_process(int fd)
 				: value[strlen(value) - 1];
 
 			do_set(key, value);
+			send(fd, "+OK\n", 4, 0);
+			continue;
+		}
+
+		if (token != NULL && !strcmp(token, "UPDATE")) {
+			char *key = strtok(NULL, " ");
+			char *value = strtok(NULL, " ");
+
+			if (key == NULL && value == NULL) {
+				send(fd, "Wrong number of arguments required for 'UPDATE' command.\n", 57, 0);
+				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'UPDATE command.\n");
+				continue;
+			}
+
+			key[strlen(key) - 1] = key[strlen(key) - 1] == '\n'
+				? '\0'
+				: key[strlen(key) - 1];
+			value[strlen(value) - 1] = value[strlen(value) - 1] == '\n'
+				? '\0'
+				: value[strlen(value) - 1];
+
+			do_update(key, value);
+			send(fd, "+OK\n", 4, 0);
+			continue;
+		}
+
+		if (token != NULL && !strcmp(token, "DELETE")) {
+			char *key = strtok(NULL, " ");
+
+			if (key == NULL) {
+				send(fd, "Wrong number of arguments required for 'DELETE' command.\n", 57, 0);
+				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'DELETE' command.\n");
+				continue;
+			}
+
+			key[strlen(key) - 1] = key[strlen(key) - 1] == '\n'
+				? '\0'
+				: key[strlen(key) - 1];
+
+			do_delete(key);
 			send(fd, "+OK\n", 4, 0);
 			continue;
 		}
@@ -195,9 +235,8 @@ int main(int argc, char **argv)
 	}
 
 	syslog(LOG_SYSLOG | LOG_INFO, "Socket endpoint binded to localhost:1337.\n");
-
 	do_loop(sock);
-
 	close(sock);
+
 	return 0;
 }

@@ -7,4 +7,6 @@ Key ingredients:
 Available commands:
 - GET (key)
 - SET (key) (value)
+- UPDATE (key) (value)
+- DELETE (key) (value)
 ```

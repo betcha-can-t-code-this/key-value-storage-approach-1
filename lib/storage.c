@@ -32,6 +32,7 @@ static void storage_transplant_node(storage_t **storage, storage_t *current, sto
 {
 	if (current->parent == NULL) {
 		*(storage) = next;
+		return;
 	}
 
 	if (current == current->parent->left) {
