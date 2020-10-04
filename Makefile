@@ -16,7 +16,7 @@ server:
 	$(CC) $(DEBUG) -o server server.c $(SHARED_LIB)
 
 clean:
-	rm -f ./src/*.o
+	rm -f ./lib/*.o
 	rm -f ./libkv.so
 	rm -f ./server
 
