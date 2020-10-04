@@ -52,6 +52,7 @@ static void read_and_process(int fd)
 		char *token = strtok(buf, " ");
 		char response[1024];
 
+		// processing 'GET' command.
 		if (token != NULL && !strcmp(token, "GET")) {
 			char *key = strtok(NULL, " ");
 
@@ -80,6 +81,7 @@ static void read_and_process(int fd)
 			continue;
 		}
 
+		// processing 'SET' command.
 		if (token != NULL && !strcmp(token, "SET")) {
 			char *key = strtok(NULL, " ");
 			char *value = strtok(NULL, " ");
@@ -102,6 +104,7 @@ static void read_and_process(int fd)
 			continue;
 		}
 
+		// processing 'UPDATE' command.
 		if (token != NULL && !strcmp(token, "UPDATE")) {
 			char *key = strtok(NULL, " ");
 			char *value = strtok(NULL, " ");
@@ -124,6 +127,7 @@ static void read_and_process(int fd)
 			continue;
 		}
 
+		// processing 'DELETE' command.
 		if (token != NULL && !strcmp(token, "DELETE")) {
 			char *key = strtok(NULL, " ");
 
