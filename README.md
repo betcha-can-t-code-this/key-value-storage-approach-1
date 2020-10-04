@@ -4,5 +4,5 @@
 ### - Binary search tree algorithm for storage engine.
 
 ### Available commands:
-### - GET <key>
-### - SET <key> <value>
+### - GET (key)
+### - SET (key) (value)
