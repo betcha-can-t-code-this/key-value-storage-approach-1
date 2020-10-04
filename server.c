@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
+#include <syslog.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -56,6 +57,7 @@ static void read_and_process(int fd)
 
 			if (key == NULL) {
 				send(fd, "Wrong number of arguments required for 'GET' command.\n", 54, 0);
+				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'GET' command.\n");
 				continue;
 			}
 
@@ -69,6 +71,7 @@ static void read_and_process(int fd)
 
 			if (tmp == NULL) {
 				send(fd, "$-1\n", 4, 0);
+				syslog(LOG_SYSLOG | LOG_ERR, "Data with key '%s' not found.\n", key);
 				continue;
 			}
 
@@ -83,6 +86,7 @@ static void read_and_process(int fd)
 
 			if (key == NULL || value == NULL) {
 				send(fd, "Wrong number of arguments required for 'SET' command.\n", 54, 0);
+				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of argument required for 'SET' command.\n");
 				continue;
 			}
 
@@ -101,6 +105,7 @@ static void read_and_process(int fd)
 		bzero(response, 1024 * sizeof(char));
 		sprintf(response, "Unknown command '%s'\n", token);
 		send(fd, response, strlen(response), 0);
+		syslog(LOG_SYSLOG | LOG_ERR, "%s", response);
 	}
 }
 
@@ -111,21 +116,26 @@ static void do_loop(int fd)
 
 	while (1) {
 		if (listen(fd, 0) < 0) {
-			fprintf(stderr, "listen() fail.\n");
+			syslog(LOG_SYSLOG | LOG_ERR, "listen() fail.\n");
 			break;
 		}
 
+		syslog(LOG_SYSLOG | LOG_INFO, "Listening on host: localhost, port:31337.\n");
+
 		if ((acc = accept(fd, NULL, NULL)) < 0) {
-			fprintf(stderr, "accept() fail.\n");
+			syslog(LOG_SYSLOG | LOG_ERR, "accept() fail.\n");
 			break;
 		}
+
+		syslog(LOG_SYSLOG | LOG_INFO, "Incoming connection accepted.\n");
 
 		pid = fork();
 
 		if (pid == 0) {
+			syslog(LOG_SYSLOG | LOG_INFO, "Child process spawned. PID: %d\n", getpid());
 			read_and_process(acc);
 		} else if (pid < 0) {
-			fprintf(stderr, "fork() fail.\n");
+			syslog(LOG_SYSLOG | LOG_ERR, "fork() fail.\n");
 			break;
 		} else {
 			// ...
@@ -146,24 +156,32 @@ int main(int argc, char **argv)
 	struct sockaddr_in sd;
 
 	if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 1) {
-		fprintf(stderr, "socket() fail.\n");
+		syslog(LOG_SYSLOG | LOG_ERR, "socket() fail.\n");
 		return 1;
 	}
+
+	syslog(LOG_SYSLOG | LOG_INFO, "Socket endpoint initialized.\n");
 
 	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &sock_opt, sizeof(sock_opt)) < 0) {
-		fprintf(stderr, "setsockopt() fail.\n");
+		syslog(LOG_SYSLOG | LOG_ERR, "setsockopt() fail.\n");
 		return 1;
 	}
+
+	syslog(LOG_SYSLOG | LOG_INFO, "Socket endpoint set to SO_REUSEADDR.\n");
 
 	if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &sock_opt, sizeof(sock_opt)) < 0) {
-		fprintf(stderr, "setsockopt() fail.\n");
+		syslog(LOG_SYSLOG | LOG_ERR, "setsockopt() fail.\n");
 		return 1;
 	}
 
+	syslog(LOG_SYSLOG | LOG_INFO, "Socket endpoint set to TCP_NODELAY.\n");
+
 	if (setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &sock_opt, sizeof(sock_opt)) < 0) {
-		fprintf(stderr, "setsockopt() fail.\n");
+		syslog(LOG_SYSLOG | LOG_ERR, "setsockopt() fail.\n");
 		return 1;
 	}
+
+	syslog(LOG_SYSLOG | LOG_INFO, "Socket endpoint set to SO_KEEPALIVE.\n");
 
 	bzero(&sd, sizeof(struct sockaddr_in));
 
@@ -172,9 +190,11 @@ int main(int argc, char **argv)
 	sd.sin_addr.s_addr = INADDR_ANY;
 
 	if (bind(sock, (struct sockaddr *)&sd, (socklen_t)(sizeof(struct sockaddr))) < 0) {
-		fprintf(stderr, "bind() fail.\n");
+		syslog(LOG_SYSLOG | LOG_ERR, "bind() fail.\n");
 		return 1;
 	}
+
+	syslog(LOG_SYSLOG | LOG_INFO, "Socket endpoint binded to localhost:1337.\n");
 
 	do_loop(sock);
 
