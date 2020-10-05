@@ -10,10 +10,10 @@ LIB_OBJS = \
 SHARED_LIB = ./libkv.so
 
 $(SHARED_LIB): $(LIB_OBJS)
-	$(CC) -shared -Wl,--export-dynamic $(LIB_OBJS) -o $(SHARED_LIB)
+	$(CC) -pthread -shared -Wl,--export-dynamic $(LIB_OBJS) -o $(SHARED_LIB)
 
 server:
-	$(CC) $(DEBUG) -o server server.c $(SHARED_LIB)
+	$(CC) $(DEBUG) -pthread -o server server.c $(SHARED_LIB)
 
 clean:
 	rm -f ./lib/*.o

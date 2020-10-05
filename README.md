@@ -12,6 +12,10 @@ Known limitations (tested with 100000 random data):
 Fixed bug:
 	- call signal(SIGCHLD, SIG_IGN) on parent process so
 	  there is no forked process limitation.
+	- use pthread-related function instead of
+	  using a combination of fork () / vfork () -> system V shared
+	  memory related function.
+	- cleaning up some allocated memory post-interrupt signal.
 
 Available commands:
 - GET (key)

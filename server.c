@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,6 +16,11 @@
 
 #define MAX_BUFLEN	1024
 #define UNUSED(x)	((void)(x))
+
+typedef struct thread_info {
+	pthread_t thread_id;
+	int afd;
+} thread_info_t;
 
 static void signal_handler_callback(int signum)
 {
@@ -36,18 +42,19 @@ static void register_signal_handler(void)
 	return;
 }
 
-static void read_and_process(int fd, pid_t cpid)
+static void *read_and_process(void *targ)
 {
+	thread_info_t *tinfo = (thread_info_t *)targ;
 	char buf[MAX_BUFLEN];
 	int counter = 0;
 
 	while (1) {
 		bzero(buf, MAX_BUFLEN * sizeof(char));
 
-		if (recv(fd, buf, MAX_BUFLEN, 0) <= 0) {
-			shutdown(fd, SHUT_RDWR);
-			close(fd);
-			kill(cpid, SIGKILL);
+		if (recv(tinfo->afd, buf, MAX_BUFLEN, 0) <= 0) {
+			shutdown(tinfo->afd, SHUT_RDWR);
+			close(tinfo->afd);
+			pthread_exit(NULL);
 			break;
 		}
 
@@ -59,7 +66,7 @@ static void read_and_process(int fd, pid_t cpid)
 			char *key = strtok(NULL, " ");
 
 			if (key == NULL) {
-				send(fd, "Wrong number of arguments required for 'GET' command.\n", 54, 0);
+				send(tinfo->afd, "Wrong number of arguments required for 'GET' command.\n", 54, 0);
 				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'GET' command.\n");
 				continue;
 			}
@@ -73,13 +80,13 @@ static void read_and_process(int fd, pid_t cpid)
 			storage_t *tmp = do_get(key);
 
 			if (tmp == NULL) {
-				send(fd, "$-1\n", 4, 0);
+				send(tinfo->afd, "$-1\n", 4, 0);
 				syslog(LOG_SYSLOG | LOG_ERR, "Data with key '%s' not found.\n", key);
 				continue;
 			}
 
 			sprintf(response, "$%d: %s\n", counter++, tmp->value);
-			send(fd, response, strlen(response), 0);
+			send(tinfo->afd, response, strlen(response), 0);
 			continue;
 		}
 
@@ -89,7 +96,7 @@ static void read_and_process(int fd, pid_t cpid)
 			char *value = strtok(NULL, " ");
 
 			if (key == NULL || value == NULL) {
-				send(fd, "Wrong number of arguments required for 'SET' command.\n", 54, 0);
+				send(tinfo->afd, "Wrong number of arguments required for 'SET' command.\n", 54, 0);
 				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'SET' command.\n");
 				continue;
 			}
@@ -102,7 +109,7 @@ static void read_and_process(int fd, pid_t cpid)
 				: value[strlen(value) - 1];
 
 			do_set(key, value);
-			send(fd, "+OK\n", 4, 0);
+			send(tinfo->afd, "+OK\n", 4, 0);
 			continue;
 		}
 
@@ -112,7 +119,7 @@ static void read_and_process(int fd, pid_t cpid)
 			char *value = strtok(NULL, " ");
 
 			if (key == NULL && value == NULL) {
-				send(fd, "Wrong number of arguments required for 'UPDATE' command.\n", 57, 0);
+				send(tinfo->afd, "Wrong number of arguments required for 'UPDATE' command.\n", 57, 0);
 				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'UPDATE command.\n");
 				continue;
 			}
@@ -125,7 +132,7 @@ static void read_and_process(int fd, pid_t cpid)
 				: value[strlen(value) - 1];
 
 			do_update(key, value);
-			send(fd, "+OK\n", 4, 0);
+			send(tinfo->afd, "+OK\n", 4, 0);
 			continue;
 		}
 
@@ -134,7 +141,7 @@ static void read_and_process(int fd, pid_t cpid)
 			char *key = strtok(NULL, " ");
 
 			if (key == NULL) {
-				send(fd, "Wrong number of arguments required for 'DELETE' command.\n", 57, 0);
+				send(tinfo->afd, "Wrong number of arguments required for 'DELETE' command.\n", 57, 0);
 				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'DELETE' command.\n");
 				continue;
 			}
@@ -144,21 +151,22 @@ static void read_and_process(int fd, pid_t cpid)
 				: key[strlen(key) - 1];
 
 			do_delete(key);
-			send(fd, "+OK\n", 4, 0);
+			send(tinfo->afd, "+OK\n", 4, 0);
 			continue;
 		}
 
 		bzero(response, 1024 * sizeof(char));
 		sprintf(response, "Unknown command '%s'\n", token);
-		send(fd, response, strlen(response), 0);
+		send(tinfo->afd, response, strlen(response), 0);
 		syslog(LOG_SYSLOG | LOG_ERR, "%s", response);
 	}
 }
 
 static void do_loop(int fd)
 {
-	int acc;
-	pid_t pid;
+	int acc, s;
+	pthread_attr_t attr;
+	thread_info_t tinfo;
 
 	while (1) {
 		if (listen(fd, 0) < 0) {
@@ -175,15 +183,41 @@ static void do_loop(int fd)
 
 		syslog(LOG_SYSLOG | LOG_INFO, "Incoming connection accepted.\n");
 
-		pid = fork();
+		s = pthread_attr_init(&attr);
 
-		if (pid == 0) {
-			read_and_process(acc, getpid());
-		} else if (pid < 0) {
-			syslog(LOG_SYSLOG | LOG_ERR, "fork() failed.\n");
-		} else {
-			// do some awesome shit here.. :)
-			signal(SIGCHLD, SIG_IGN);
+		if (s != 0) {
+			syslog(LOG_SYSLOG | LOG_ERR, "pthread_attr_init() failed.\n");
+			break;
+		}
+
+		bzero(&tinfo, sizeof(thread_info_t));
+
+		tinfo.afd = acc;
+
+		s = pthread_create(
+			&tinfo.thread_id,
+			&attr,
+			&read_and_process,
+			&tinfo
+		);
+
+		if (s != 0) {
+			syslog(LOG_SYSLOG | LOG_ERR, "pthread_create() failed.\n");
+			break;
+		}
+
+		s = pthread_attr_destroy(&attr);
+
+		if (s != 0) {
+			syslog(LOG_SYSLOG | LOG_ERR, "pthread_attr_destroy() failed.\n");
+			break;
+		}
+
+		s = pthread_detach(tinfo.thread_id);
+
+		if (s != 0) {
+			syslog(LOG_SYSLOG | LOG_ERR, "pthread_detach() failed.\n");
+			break;
 		}
 	}
 }
