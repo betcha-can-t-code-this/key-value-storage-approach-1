@@ -15,11 +15,11 @@
 
 #define MAX_BUFLEN	1024
 #define UNUSED(x)	((void)(x))
-#define MAX_PROC	5
 
 static void signal_handler_callback(int signum)
 {
 	storage_destroy();
+	_exit(0);
 }
 
 static void register_signal_handler(void)
@@ -36,7 +36,7 @@ static void register_signal_handler(void)
 	return;
 }
 
-static void read_and_process(int fd)
+static void read_and_process(int fd, pid_t cpid)
 {
 	char buf[MAX_BUFLEN];
 	int counter = 0;
@@ -44,8 +44,10 @@ static void read_and_process(int fd)
 	while (1) {
 		bzero(buf, MAX_BUFLEN * sizeof(char));
 
-		if (recv(fd, buf, MAX_BUFLEN, 0) < 0) {
-			fprintf(stderr, "read() fail.\n");
+		if (recv(fd, buf, MAX_BUFLEN, 0) <= 0) {
+			shutdown(fd, SHUT_RDWR);
+			close(fd);
+			kill(cpid, SIGKILL);
 			break;
 		}
 
@@ -157,7 +159,6 @@ static void do_loop(int fd)
 {
 	int acc;
 	pid_t pid;
-	int i = 0;
 
 	while (1) {
 		if (listen(fd, 0) < 0) {
@@ -165,7 +166,7 @@ static void do_loop(int fd)
 			break;
 		}
 
-		syslog(LOG_SYSLOG | LOG_INFO, "Listening on host: localhost, port:31337.\n");
+		syslog(LOG_SYSLOG | LOG_INFO, "Listening on host: localhost, port:1337.\n");
 
 		if ((acc = accept(fd, NULL, NULL)) < 0) {
 			syslog(LOG_SYSLOG | LOG_ERR, "accept() fail.\n");
@@ -174,16 +175,15 @@ static void do_loop(int fd)
 
 		syslog(LOG_SYSLOG | LOG_INFO, "Incoming connection accepted.\n");
 
-		if (i++ < MAX_PROC) {
-			pid = fork();
+		pid = fork();
 
-			if (pid == 0) {
-				read_and_process(acc);
-			} else if (pid < 0) {
-				syslog(LOG_SYSLOG | LOG_ERR, "fork() failed.\n");
-			} else {
-				// do nothing..
-			}
+		if (pid == 0) {
+			read_and_process(acc, getpid());
+		} else if (pid < 0) {
+			syslog(LOG_SYSLOG | LOG_ERR, "fork() failed.\n");
+		} else {
+			// do some awesome shit here.. :)
+			signal(SIGCHLD, SIG_IGN);
 		}
 	}
 }

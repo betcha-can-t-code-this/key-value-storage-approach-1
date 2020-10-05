@@ -9,6 +9,10 @@ Known limitations (tested with 100000 random data):
 	- big memory footprint due to storage algorithm i use.
 	- can only handle 5 forked process.
 
+Fixed bug:
+	- call signal(SIGCHLD, SIG_IGN) on parent process so
+	  there is no forked process limitation.
+
 Available commands:
 - GET (key)
 - SET (key) (value)
