@@ -157,6 +157,7 @@ static void do_loop(int fd)
 {
 	int acc;
 	pid_t pid;
+	int i = 0;
 
 	while (1) {
 		if (listen(fd, 0) < 0) {
@@ -173,16 +174,16 @@ static void do_loop(int fd)
 
 		syslog(LOG_SYSLOG | LOG_INFO, "Incoming connection accepted.\n");
 
-		pid = fork();
+		if (i++ < MAX_PROC) {
+			pid = fork();
 
-		if (pid == 0) {
-			syslog(LOG_SYSLOG | LOG_INFO, "Child process spawned. PID: %d\n", getpid());
-			read_and_process(acc);
-		} else if (pid < 0) {
-			syslog(LOG_SYSLOG | LOG_ERR, "fork() fail.\n");
-			break;
-		} else {
-			// ...
+			if (pid == 0) {
+				read_and_process(acc);
+			} else if (pid < 0) {
+				syslog(LOG_SYSLOG | LOG_ERR, "fork() failed.\n");
+			} else {
+				// do nothing..
+			}
 		}
 	}
 }
