@@ -1,6 +1,8 @@
+#define _GNU_SOURCE
 #include <pthread.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 #include <syslog.h>
@@ -19,12 +21,20 @@
 
 typedef struct thread_info {
 	pthread_t thread_id;
+	int pfd;
 	int afd;
 } thread_info_t;
+
+static thread_info_t thread_info = {
+	.thread_id = 0,
+	.pfd = 0,
+	.afd = 0
+};
 
 static void signal_handler_callback(int signum)
 {
 	storage_destroy();
+	close(thread_info.pfd);
 	_exit(0);
 }
 
@@ -58,7 +68,10 @@ static void *read_and_process(void *targ)
 			break;
 		}
 
+		buf[strlen(buf) - 1] = '\0';
+
 		char *token = strtok(buf, " ");
+		char *errmsg;
 		char response[1024];
 
 		// processing 'GET' command.
@@ -66,16 +79,12 @@ static void *read_and_process(void *targ)
 			char *key = strtok(NULL, " ");
 
 			if (key == NULL) {
-				send(tinfo->afd, "Wrong number of arguments required for 'GET' command.\n", 54, 0);
-				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'GET' command.\n");
+				errmsg = strdup("-ERR Wrong number of arguments required for 'GET' command.\n");
+				send(tinfo->afd, errmsg, strlen(errmsg), 0);
+				syslog(LOG_SYSLOG | LOG_ERR, "%s", errmsg);
+				free(errmsg);
 				continue;
 			}
-
-			key[strlen(key) - 1] = key[strlen(key) - 1] == '\n'
-				? '\0'
-				: key[strlen(key) - 1];
-
-			bzero(response, 1024 * sizeof(char));
 
 			storage_t *tmp = do_get(key);
 
@@ -85,7 +94,8 @@ static void *read_and_process(void *targ)
 				continue;
 			}
 
-			sprintf(response, "$%d: %s\n", counter++, tmp->value);
+			bzero(response, MAX_BUFLEN);
+			sprintf(response, "$%ld: %s\n", strlen(tmp->value), tmp->value);
 			send(tinfo->afd, response, strlen(response), 0);
 			continue;
 		}
@@ -96,17 +106,12 @@ static void *read_and_process(void *targ)
 			char *value = strtok(NULL, " ");
 
 			if (key == NULL || value == NULL) {
-				send(tinfo->afd, "Wrong number of arguments required for 'SET' command.\n", 54, 0);
-				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'SET' command.\n");
+				errmsg = strdup("-ERR wrong number of arguments required for 'SET' command.\n");
+				send(tinfo->afd, errmsg, strlen(errmsg), 0);
+				syslog(LOG_SYSLOG | LOG_ERR, "%s", errmsg);
+				free(errmsg);
 				continue;
 			}
-
-			key[strlen(key) - 1] = key[strlen(key) - 1] == '\n'
-				? '\0'
-				: key[strlen(key) - 1];
-			value[strlen(value) - 1] = value[strlen(value) - 1] == '\n'
-				? '\0'
-				: value[strlen(value) - 1];
 
 			do_set(key, value);
 			send(tinfo->afd, "+OK\n", 4, 0);
@@ -119,17 +124,12 @@ static void *read_and_process(void *targ)
 			char *value = strtok(NULL, " ");
 
 			if (key == NULL && value == NULL) {
-				send(tinfo->afd, "Wrong number of arguments required for 'UPDATE' command.\n", 57, 0);
-				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'UPDATE command.\n");
+				errmsg = strdup("-ERR wrong number of arguments required for 'UPDATE' command.\n");
+				send(tinfo->afd, errmsg, strlen(errmsg), 0);
+				syslog(LOG_SYSLOG | LOG_ERR, "%s", errmsg);
+				free(errmsg);
 				continue;
 			}
-
-			key[strlen(key) - 1] = key[strlen(key) - 1] == '\n'
-				? '\0'
-				: key[strlen(key) - 1];
-			value[strlen(value) - 1] = value[strlen(value) - 1] == '\n'
-				? '\0'
-				: value[strlen(value) - 1];
 
 			do_update(key, value);
 			send(tinfo->afd, "+OK\n", 4, 0);
@@ -141,14 +141,12 @@ static void *read_and_process(void *targ)
 			char *key = strtok(NULL, " ");
 
 			if (key == NULL) {
-				send(tinfo->afd, "Wrong number of arguments required for 'DELETE' command.\n", 57, 0);
-				syslog(LOG_SYSLOG | LOG_ERR, "Wrong number of arguments required for 'DELETE' command.\n");
+				errmsg = strdup("-ERR wrong number of arguments required for 'DELETE' command.\n");
+				send(tinfo->afd, errmsg, strlen(errmsg), 0);
+				syslog(LOG_SYSLOG | LOG_ERR, "%s", errmsg);
+				free(errmsg);
 				continue;
 			}
-
-			key[strlen(key) - 1] = key[strlen(key) - 1] == '\n'
-				? '\0'
-				: key[strlen(key) - 1];
 
 			do_delete(key);
 			send(tinfo->afd, "+OK\n", 4, 0);
@@ -162,61 +160,43 @@ static void *read_and_process(void *targ)
 	}
 }
 
-static void do_loop(int fd)
+static void do_loop(void)
 {
-	int acc, s;
+	int s;
 	pthread_attr_t attr;
-	thread_info_t tinfo;
 
 	while (1) {
-		if (listen(fd, 0) < 0) {
+		if (listen(thread_info.pfd, 0) < 0) {
 			syslog(LOG_SYSLOG | LOG_ERR, "listen() fail.\n");
 			break;
 		}
 
 		syslog(LOG_SYSLOG | LOG_INFO, "Listening on host: localhost, port:1337.\n");
 
-		if ((acc = accept(fd, NULL, NULL)) < 0) {
+		if ((thread_info.afd = accept(thread_info.pfd, NULL, NULL)) < 0) {
 			syslog(LOG_SYSLOG | LOG_ERR, "accept() fail.\n");
 			break;
 		}
 
 		syslog(LOG_SYSLOG | LOG_INFO, "Incoming connection accepted.\n");
 
-		s = pthread_attr_init(&attr);
-
-		if (s != 0) {
-			syslog(LOG_SYSLOG | LOG_ERR, "pthread_attr_init() failed.\n");
+		if ((s = pthread_attr_init(&attr)) != 0) {
+			syslog(LOG_SYSLOG | LOG_ERR, "pthread_attr_init() failed (errno: %d).\n", s);
 			break;
 		}
 
-		bzero(&tinfo, sizeof(thread_info_t));
-
-		tinfo.afd = acc;
-
-		s = pthread_create(
-			&tinfo.thread_id,
-			&attr,
-			&read_and_process,
-			&tinfo
-		);
-
-		if (s != 0) {
-			syslog(LOG_SYSLOG | LOG_ERR, "pthread_create() failed.\n");
+		if ((s = pthread_create(&thread_info.thread_id, &attr, &read_and_process, &thread_info)) != 0) {
+			syslog(LOG_SYSLOG | LOG_ERR, "pthread_create() failed (errno: %d).\n", s);
 			break;
 		}
 
-		s = pthread_attr_destroy(&attr);
-
-		if (s != 0) {
-			syslog(LOG_SYSLOG | LOG_ERR, "pthread_attr_destroy() failed.\n");
+		if ((s = pthread_attr_destroy(&attr)) != 0) {
+			syslog(LOG_SYSLOG | LOG_ERR, "pthread_attr_destroy() failed (errno: %d).\n", s);
 			break;
 		}
 
-		s = pthread_detach(tinfo.thread_id);
-
-		if (s != 0) {
-			syslog(LOG_SYSLOG | LOG_ERR, "pthread_detach() failed.\n");
+		if ((s = pthread_detach(thread_info.thread_id)) != 0) {
+			syslog(LOG_SYSLOG | LOG_ERR, "pthread_detach() failed (errno: %d).\n", s);
 			break;
 		}
 	}
@@ -229,33 +209,32 @@ int main(int argc, char **argv)
 
 	register_signal_handler();
 
-	int sock;
 	int sock_opt = 1;
 	int i;
 	struct sockaddr_in sd;
 
-	if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 1) {
+	if ((thread_info.pfd = socket(AF_INET, SOCK_STREAM, 0)) < 1) {
 		syslog(LOG_SYSLOG | LOG_ERR, "socket() fail.\n");
 		return 1;
 	}
 
 	syslog(LOG_SYSLOG | LOG_INFO, "Socket endpoint initialized.\n");
 
-	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &sock_opt, sizeof(sock_opt)) < 0) {
+	if (setsockopt(thread_info.pfd, SOL_SOCKET, SO_REUSEADDR, &sock_opt, sizeof(sock_opt)) < 0) {
 		syslog(LOG_SYSLOG | LOG_ERR, "setsockopt() fail.\n");
 		return 1;
 	}
 
 	syslog(LOG_SYSLOG | LOG_INFO, "Socket endpoint set to SO_REUSEADDR.\n");
 
-	if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &sock_opt, sizeof(sock_opt)) < 0) {
+	if (setsockopt(thread_info.pfd, IPPROTO_TCP, TCP_NODELAY, &sock_opt, sizeof(sock_opt)) < 0) {
 		syslog(LOG_SYSLOG | LOG_ERR, "setsockopt() fail.\n");
 		return 1;
 	}
 
 	syslog(LOG_SYSLOG | LOG_INFO, "Socket endpoint set to TCP_NODELAY.\n");
 
-	if (setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &sock_opt, sizeof(sock_opt)) < 0) {
+	if (setsockopt(thread_info.pfd, SOL_SOCKET, SO_KEEPALIVE, &sock_opt, sizeof(sock_opt)) < 0) {
 		syslog(LOG_SYSLOG | LOG_ERR, "setsockopt() fail.\n");
 		return 1;
 	}
@@ -268,14 +247,14 @@ int main(int argc, char **argv)
 	sd.sin_port = htons(1337);
 	sd.sin_addr.s_addr = INADDR_ANY;
 
-	if (bind(sock, (struct sockaddr *)&sd, (socklen_t)(sizeof(struct sockaddr))) < 0) {
+	if (bind(thread_info.pfd, (struct sockaddr *)&sd, (socklen_t)(sizeof(struct sockaddr))) < 0) {
 		syslog(LOG_SYSLOG | LOG_ERR, "bind() fail.\n");
 		return 1;
 	}
 
 	syslog(LOG_SYSLOG | LOG_INFO, "Socket endpoint binded to localhost:1337.\n");
-	do_loop(sock);
-	close(sock);
+
+	do_loop();
 
 	return 0;
 }
