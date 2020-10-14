@@ -68,6 +68,7 @@ static void *read_and_process(void *targ)
 			break;
 		}
 
+		fprintf(stdout, "%s", buf);
 		buf[strlen(buf) - 1] = '\0';
 
 		char *token = strtok(buf, " ");
@@ -104,6 +105,7 @@ static void *read_and_process(void *targ)
 		if (token != NULL && !strcmp(token, "SET")) {
 			char *key = strtok(NULL, " ");
 			char *value = strtok(NULL, " ");
+			char tval[MAX_BUFLEN];
 
 			if (key == NULL || value == NULL) {
 				errmsg = strdup("-ERR wrong number of arguments required for 'SET' command.\n");
@@ -113,8 +115,17 @@ static void *read_and_process(void *targ)
 				continue;
 			}
 
-			do_set(key, value);
+			bzero(tval, MAX_BUFLEN);
+
+			while (value != NULL) {
+				strcat(tval, value);
+				sprintf(tval, "%s ", tval);
+				value = strtok(NULL, " ");
+			}
+
+			do_set(key, tval);
 			send(tinfo->afd, "+OK\n", 4, 0);
+			bzero(tval, MAX_BUFLEN);
 			continue;
 		}
 
